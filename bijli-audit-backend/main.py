@@ -145,15 +145,42 @@ def _rotate(img: np.ndarray, angle: int) -> np.ndarray:
     return cv2.rotate(img, code)
 
 
-def _prepare_gray(img: np.ndarray, max_width: int = 800) -> np.ndarray:
-    """Grayscale + contrast-normalize + downscale for faster OCR."""
+def _prepare_gray(
+    img: np.ndarray, min_width: int = 1600, max_width: int = 2200
+) -> np.ndarray:
+    """Upscale-to-readable + grayscale + binarize for Tesseract.
+
+    Tesseract reads far better from a crisp, binarized bitmap at ~1600-2200px
+    wide than from the small, normalized image EasyOCR preferred.
+    """
+    img = img.copy()
+    h, w = img.shape[:2]
+    if w < min_width:
+        scale = min_width / w
+    elif w > max_width:
+        scale = max_width / w
+    else:
+        scale = 1.0
+    if abs(scale - 1.0) > 1e-6:
+        img = cv2.resize(
+            img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC
+        )
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    return cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15
+    )
+
+
+def _prepare_probe(img: np.ndarray, max_width: int = 640) -> np.ndarray:
+    """Small normalized gray for fast rotation probing."""
     img = img.copy()
     h, w = img.shape[:2]
     if w > max_width:
         img = cv2.resize(
             img, (max_width, int(h * (max_width / w))), interpolation=cv2.INTER_AREA
         )
-
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
 
@@ -257,7 +284,7 @@ def preprocess_and_ocr(temp_path: str, img: np.ndarray):
     img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
     # --- 2. Fast path: upright, full-res single pass ---
-    prepared_0 = _prepare_gray(img, max_width=800)
+    prepared_0 = _prepare_gray(img)
     lines_0, score_0 = _ocr_once(prepared_0, temp_path)
 
     if check_mepco_structure(lines_0):
@@ -271,12 +298,12 @@ def preprocess_and_ocr(temp_path: str, img: np.ndarray):
 
     for angle in (90, 180, 270):
         rotated = _rotate(img, angle)
-        probe = _prepare_gray(rotated, max_width=480)
+        probe = _prepare_probe(rotated, max_width=640)
         probe_lines, probe_score = _ocr_once(probe, temp_path)
 
         if check_mepco_structure(probe_lines):
             # Found the correct orientation — re-OCR at full quality.
-            full = _prepare_gray(_rotate(img, angle), max_width=800)
+            full = _prepare_gray(_rotate(img, angle))
             lines_full, score_full = _ocr_once(full, temp_path)
             print(f"[OK] MEPCO bill detected at {angle} degrees rotation.")
             return lines_full, True, angle
@@ -287,7 +314,7 @@ def preprocess_and_ocr(temp_path: str, img: np.ndarray):
             best_lines = probe_lines
 
     if best_angle != 0:
-        full = _prepare_gray(_rotate(img, best_angle), max_width=800)
+        full = _prepare_gray(_rotate(img, best_angle))
         lines_full, score_full = _ocr_once(full, temp_path)
         if score_full > best_score:
             best_lines = lines_full
@@ -647,7 +674,7 @@ async def meter_check(file: UploadFile = File(...), bill_id: int | None = None):
     temp_path = f"meter_{uuid.uuid4().hex[:8]}.webp"
     try:
         with _ocr_lock:
-            prepared = _prepare_gray(np_img, max_width=700)
+            prepared = _prepare_gray(np_img)
             lines, _ = _ocr_once(prepared, temp_path)
     finally:
         if os.path.exists(temp_path):
