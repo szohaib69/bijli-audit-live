@@ -146,12 +146,13 @@ def _rotate(img: np.ndarray, angle: int) -> np.ndarray:
 
 
 def _prepare_gray(
-    img: np.ndarray, min_width: int = 1600, max_width: int = 2200
+    img: np.ndarray, min_width: int = 3000, max_width: int = 2200
 ) -> np.ndarray:
-    """Upscale-to-readable + grayscale + binarize for Tesseract.
+    """Upscale-to-readable + grayscale + Otsu binarize for Tesseract.
 
-    Tesseract reads far better from a crisp, binarized bitmap at ~1600-2200px
-    wide than from the small, normalized image EasyOCR preferred.
+    Tesseract reads far better from a crisp Otsu-binarized bitmap. Small
+    screenshots are upscaled aggressively; large photos are capped so OCR
+    stays fast.
     """
     img = img.copy()
     h, w = img.shape[:2]
@@ -168,9 +169,8 @@ def _prepare_gray(
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
-    return cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15
-    )
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return thresh
 
 
 def _prepare_probe(img: np.ndarray, max_width: int = 640) -> np.ndarray:
