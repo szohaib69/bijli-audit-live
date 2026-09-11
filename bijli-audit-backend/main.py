@@ -72,7 +72,20 @@ def on_startup():
     init_db()
 
 
-reader = easyocr.Reader(["en"], gpu=False)
+_reader = None
+_reader_lock = threading.Lock()
+
+
+def _get_reader():
+    """Lazy-load EasyOCR so the server starts without PyTorch in memory."""
+    global _reader
+    if _reader is None:
+        with _reader_lock:
+            if _reader is None:
+                _reader = easyocr.Reader(["en"], gpu=False)
+    return _reader
+
+
 # EasyOCR is not thread-safe; serialize OCR + DB work per job.
 _ocr_lock = threading.Lock()
 JOBS: dict[str, dict] = {}
@@ -228,7 +241,7 @@ def _score_text(results: list) -> float:
 def _ocr_once(prepared: np.ndarray, temp_path: str) -> tuple[list[str], float]:
     """Run a single OCR pass; returns (lines, confidence_score)."""
     cv2.imwrite(temp_path, prepared)
-    results = reader.readtext(temp_path, detail=1, paragraph=False)
+    results = _get_reader().readtext(temp_path, detail=1, paragraph=False)
     lines = [r[1].strip() for r in results if r[1].strip()]
     return lines, _score_text(results)
 
