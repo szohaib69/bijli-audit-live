@@ -9,6 +9,7 @@ node_modules/
 .env
 .env*
 *.env
+!.env.example
 
 # backend runtime data (PII — never push)
 bijli-audit-backend/*.db

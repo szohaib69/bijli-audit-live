@@ -32,13 +32,25 @@ from sqlmodel import Session, select
 
 app = FastAPI()
 
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+DATA_DIR = os.getenv("DATA_DIR", "media")
 
 
 class PlanRequest(BaseModel):
@@ -340,9 +352,9 @@ def _run_extraction_job(job_id: str, raw_bytes: bytes, filename: str, is_pdf: bo
 
             # Persist the original upload so it can be included in the backup.
             try:
-                os.makedirs("media", exist_ok=True)
+                os.makedirs(DATA_DIR, exist_ok=True)
                 ext = os.path.splitext(filename)[1].lower() or ".webp"
-                dest = os.path.join("media", f"bill_{record_id}{ext}")
+                dest = os.path.join(DATA_DIR, f"bill_{record_id}{ext}")
                 with open(dest, "wb") as f:
                     f.write(raw_bytes)
                 record.image_path = dest

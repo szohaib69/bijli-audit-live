@@ -1,6 +1,7 @@
 from sqlmodel import SQLModel, Field, create_engine, Session
 from typing import Optional
 from datetime import datetime
+import os
 
 
 class BillRecord(SQLModel, table=True):
@@ -24,7 +25,8 @@ class ChatMessage(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-engine = create_engine("sqlite:///bijli_audit.db", echo=False)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bijli_audit.db")
+engine = create_engine(DATABASE_URL, echo=False)
 
 
 def init_db():
