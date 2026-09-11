@@ -22,8 +22,8 @@ openai==3.7.0               # Client used for bill extraction + Bijli chat (Open
 requests==2.34.2            # HTTP helper used in OCR/extraction helpers
 
 # ---------- OCR (reading bill photos) ----------
-easyocr==1.7.2              # Text recognition on bill/meter images (pulls in PyTorch)
-opencv-python-headless==5.0.0.93  # Image pre-processing used with EasyOCR
+pytesseract==0.3.13           # Lightweight OCR (Tesseract engine) — fits free tiers
+opencv-python-headless==5.0.0.93  # Image pre-processing used with OCR
 numpy==2.5.2                # Numeric arrays for image processing
 pillow==12.3.0              # Image I/O and rotation/cleanup (PIL)
 

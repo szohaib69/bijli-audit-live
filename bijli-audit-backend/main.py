@@ -6,9 +6,9 @@ import threading
 import uuid
 import zipfile
 import cv2
-import easyocr
 import numpy as np
 import pypdfium2 as pdfium
+import pytesseract
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -72,21 +72,8 @@ def on_startup():
     init_db()
 
 
-_reader = None
-_reader_lock = threading.Lock()
-
-
-def _get_reader():
-    """Lazy-load EasyOCR so the server starts without PyTorch in memory."""
-    global _reader
-    if _reader is None:
-        with _reader_lock:
-            if _reader is None:
-                _reader = easyocr.Reader(["en"], gpu=False)
-    return _reader
-
-
-# EasyOCR is not thread-safe; serialize OCR + DB work per job.
+# OCR work is serialized per job; Tesseract is far lighter than EasyOCR/PyTorch
+# so this backend fits comfortably on free-tier hosts (~200 MB peak).
 _ocr_lock = threading.Lock()
 JOBS: dict[str, dict] = {}
 
@@ -230,20 +217,26 @@ def _pdf_to_image(contents: bytes, max_pages: int = 2) -> np.ndarray:
     return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
-def _score_text(results: list) -> float:
-    """Sum of per-word confidence — used to pick the upright orientation."""
-    if not results:
-        return 0.0
-    confs = [float(r[2]) for r in results if r and len(r) >= 3 and r[1].strip()]
-    return sum(confs)
-
-
 def _ocr_once(prepared: np.ndarray, temp_path: str) -> tuple[list[str], float]:
-    """Run a single OCR pass; returns (lines, confidence_score)."""
+    """Run a single Tesseract pass; returns (lines, confidence_score)."""
     cv2.imwrite(temp_path, prepared)
-    results = _get_reader().readtext(temp_path, detail=1, paragraph=False)
-    lines = [r[1].strip() for r in results if r[1].strip()]
-    return lines, _score_text(results)
+    data = pytesseract.image_to_data(
+        temp_path, config="--oem 3 --psm 6", output_type=pytesseract.Output.DICT
+    )
+    line_text: dict[int, list[str]] = {}
+    line_conf: dict[int, list[float]] = {}
+    for i, raw in enumerate(data.get("text") or []):
+        token = (raw or "").strip()
+        if not token:
+            continue
+        line_no = data["line_num"][i] if i < len(data["line_num"]) else 0
+        conf = data["conf"][i] if i < len(data["conf"]) else 0
+        line_text.setdefault(line_no, []).append(token)
+        line_conf.setdefault(line_no, []).append(float(conf) if conf >= 0 else 0.0)
+
+    lines = [" ".join(line_text[k]) for k in sorted(line_text)]
+    score = sum(sum(v) for v in line_conf.values())
+    return lines, score
 
 
 def preprocess_and_ocr(temp_path: str, img: np.ndarray):
